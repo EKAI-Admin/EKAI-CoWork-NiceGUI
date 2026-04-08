@@ -3,7 +3,7 @@ from auth import get_current_user
 from db import (
     get_coworkers, create_coworker, update_coworker, delete_coworker,
     get_settings, get_coworker_dir, get_prompt, save_prompt,
-    start_run, get_runs,
+    start_run, get_runs, get_user_by_username,
 )
 from ai_runner import process_run
 from models import STATUS_OPTIONS, WORKFLOW_OPTIONS, CLAUDE_MODELS, OLLAMA_MODELS
@@ -140,6 +140,14 @@ def _show_prompt_dialog(coworker):
 def dashboard_page():
     user = get_current_user()
     if not user:
+        ui.navigate.to("/login")
+        return
+
+    # Validate session user still exists in DB (handles DB resets)
+    db_user = get_user_by_username(user["username"])
+    if not db_user:
+        from auth import logout
+        logout()
         ui.navigate.to("/login")
         return
 

@@ -1,12 +1,19 @@
 from nicegui import ui
 from auth import get_current_user
-from db import get_settings, upsert_settings
+from db import get_settings, upsert_settings, get_user_by_username
 from models import CLAUDE_MODELS, OLLAMA_MODELS
 
 
 def settings_page():
     user = get_current_user()
     if not user:
+        ui.navigate.to("/login")
+        return
+
+    db_user = get_user_by_username(user["username"])
+    if not db_user:
+        from auth import logout
+        logout()
         ui.navigate.to("/login")
         return
 
