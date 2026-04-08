@@ -73,59 +73,43 @@ def _read_input_files(inputs_dir: Path) -> list[dict]:
     return files
 
 
-def _build_text_message(prompt: str, files: list[dict]) -> str:
-    """Build a plain-text message for providers that don't support multimodal."""
-    parts = [prompt, "", "---", ""]
-    for f in files:
-        if f["type"] == "text":
-            parts.append(f"## File: {f['name']}")
-            parts.append(f"```\n{f['content']}\n```")
-            parts.append("")
-        else:
-            parts.append(f"## File: {f['name']}")
-            parts.append(f"[{f['type'].upper()} file — sent as attachment]")
-            parts.append("")
+def _build_text_message_single(prompt: str, file: dict) -> str:
+    """Build a plain-text message for a single file (Ollama)."""
+    parts = [prompt, "", "---", "", f"## File: {file['name']}"]
+    if file["type"] == "text":
+        parts.append(f"```\n{file['content']}\n```")
+    else:
+        parts.append(f"[{file['type'].upper()} file — sent as attachment]")
     return "\n".join(parts)
 
 
-def _build_claude_content_blocks(prompt: str, files: list[dict]) -> list[dict]:
-    """Build Claude API content blocks with native image/PDF support."""
-    blocks = []
+def _build_claude_blocks_single(prompt: str, file: dict) -> list[dict]:
+    """Build Claude API content blocks for a single file."""
+    blocks = [{"type": "text", "text": prompt + f"\n\n---\n\n## File: {file['name']}"}]
 
-    # Prompt as text block
-    blocks.append({"type": "text", "text": prompt + "\n\n---\n"})
-
-    for f in files:
-        if f["type"] == "image":
-            # File label
-            blocks.append({"type": "text", "text": f"## File: {f['name']}"})
-            # Native image block
-            blocks.append({
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": f["media_type"],
-                    "data": f["data"],
-                },
-            })
-        elif f["type"] == "pdf":
-            # File label
-            blocks.append({"type": "text", "text": f"## File: {f['name']}"})
-            # Native PDF document block
-            blocks.append({
-                "type": "document",
-                "source": {
-                    "type": "base64",
-                    "media_type": "application/pdf",
-                    "data": f["data"],
-                },
-            })
-        else:
-            # Text file as code block
-            blocks.append({
-                "type": "text",
-                "text": f"## File: {f['name']}\n```\n{f['content']}\n```\n",
-            })
+    if file["type"] == "image":
+        blocks.append({
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": file["media_type"],
+                "data": file["data"],
+            },
+        })
+    elif file["type"] == "pdf":
+        blocks.append({
+            "type": "document",
+            "source": {
+                "type": "base64",
+                "media_type": "application/pdf",
+                "data": file["data"],
+            },
+        })
+    else:
+        blocks.append({
+            "type": "text",
+            "text": f"```\n{file['content']}\n```",
+        })
 
     return blocks
 
@@ -136,21 +120,37 @@ def _write_result(
     provider: str,
     model_name: str,
     files: list[dict],
-    response_text: str,
+    file_results: list[dict],
     coworker_outputs_dir: Path,
 ) -> Path:
-    """Write the AI response to outputs/result.md with metadata header."""
+    """Write per-file AI analyses to outputs/result.md.
+
+    Args:
+        file_results: list of dicts with 'name', 'type', 'response' keys.
+    """
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     file_list = ", ".join(f"{f['name']} ({f['type']})" for f in files)
 
-    content = (
-        f"# Run Output — {coworker_name}\n"
-        f"**Model**: {provider}:{model_name}  \n"
-        f"**Timestamp**: {timestamp}  \n"
-        f"**Input Files**: {file_list}\n"
-        f"\n---\n\n"
-        f"{response_text}\n"
-    )
+    sections = [
+        f"# Run Output — {coworker_name}",
+        f"**Model**: {provider}:{model_name}  ",
+        f"**Timestamp**: {timestamp}  ",
+        f"**Input Files**: {file_list}  ",
+        f"**Files Processed**: {len(file_results)}",
+        "",
+        "---",
+        "",
+    ]
+
+    for i, fr in enumerate(file_results, 1):
+        sections.append(f"## {i}. {fr['name']} ({fr['type']})")
+        sections.append("")
+        sections.append(fr["response"])
+        sections.append("")
+        sections.append("---")
+        sections.append("")
+
+    content = "\n".join(sections)
 
     output_file = run_dir / "outputs" / "result.md"
     output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -165,10 +165,10 @@ def _write_result(
 
 # --- Claude ---
 
-def _call_claude(model: str, prompt: str, files: list[dict]) -> str:
-    """Send prompt + files to Claude API using native multimodal content blocks."""
+def _call_claude_single(model: str, prompt: str, file: dict) -> str:
+    """Send prompt + one file to Claude API using native multimodal content blocks."""
     client = anthropic.Anthropic()
-    content_blocks = _build_claude_content_blocks(prompt, files)
+    content_blocks = _build_claude_blocks_single(prompt, file)
 
     message = client.messages.create(
         model=model,
@@ -180,24 +180,17 @@ def _call_claude(model: str, prompt: str, files: list[dict]) -> str:
 
 # --- Ollama ---
 
-def _call_ollama(model: str, prompt: str, files: list[dict], base_url: str) -> str:
-    """Send prompt + files to Ollama API.
-
-    For multimodal models (llava, etc.), images are sent via the 'images' field.
-    PDFs are sent as text descriptions since Ollama doesn't natively support PDFs.
-    """
-    text_message = _build_text_message(prompt, files)
-
-    # Collect base64 images for Ollama's multimodal support
-    images = [f["data"] for f in files if f["type"] == "image"]
+def _call_ollama_single(model: str, prompt: str, file: dict, base_url: str) -> str:
+    """Send prompt + one file to Ollama API."""
+    text_message = _build_text_message_single(prompt, file)
 
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": text_message}],
         "stream": False,
     }
-    if images:
-        payload["messages"][0]["images"] = images
+    if file["type"] == "image":
+        payload["messages"][0]["images"] = [file["data"]]
 
     response = httpx.post(
         f"{base_url.rstrip('/')}/api/chat",
@@ -214,17 +207,18 @@ def process_run(
     coworker: dict,
     run_dir: Path,
     ollama_base_url: str = "http://localhost:11434",
+    on_file_done: callable = None,
 ) -> Path:
-    """Process a run: read inputs + prompt, call AI, write result.
+    """Process a run: loop over each input file, call AI individually, append to result.
 
-    Supports text files, images (png/jpg/gif/webp), and PDFs.
-    Claude gets native multimodal content blocks.
-    Ollama gets images via the images field for multimodal models.
+    Each file is sent to the AI model separately with the same prompt.
+    All analyses are combined into a single result.md.
 
     Args:
         coworker: dict with keys 'name', 'model_provider', 'model_name'
         run_dir: Path to the timestamped run directory
         ollama_base_url: Ollama server URL (only used if provider is 'ollama')
+        on_file_done: optional callback(file_index, total, filename) for progress
 
     Returns:
         Path to the output result.md file
@@ -244,16 +238,28 @@ def process_run(
     model = coworker["model_name"]
     name = coworker["name"]
 
-    if provider == "claude":
-        response_text = _call_claude(model, prompt, files)
-    elif provider == "ollama":
-        response_text = _call_ollama(model, prompt, files, ollama_base_url)
-    else:
-        raise ValueError(f"Unknown provider: {provider}")
+    # Process each file individually
+    file_results = []
+    for i, f in enumerate(files):
+        if provider == "claude":
+            response = _call_claude_single(model, prompt, f)
+        elif provider == "ollama":
+            response = _call_ollama_single(model, prompt, f, ollama_base_url)
+        else:
+            raise ValueError(f"Unknown provider: {provider}")
+
+        file_results.append({
+            "name": f["name"],
+            "type": f["type"],
+            "response": response,
+        })
+
+        if on_file_done:
+            on_file_done(i + 1, len(files), f["name"])
 
     coworker_outputs_dir = run_dir.parent.parent / "outputs"
 
     output_file = _write_result(
-        run_dir, name, provider, model, files, response_text, coworker_outputs_dir,
+        run_dir, name, provider, model, files, file_results, coworker_outputs_dir,
     )
     return output_file

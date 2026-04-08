@@ -195,17 +195,15 @@ def dashboard_page():
                             lbl.text = f"Processing {len(copied)} file(s) with {c['model_provider']}:{c['model_name']}..."
                             lbl.visible = True
 
-                            # Get ollama URL from user settings
                             user_settings = get_settings(user_id)
                             ollama_url = user_settings["ollama_base_url"] if user_settings else "http://localhost:11434"
 
-                            # Run AI processing in background thread to avoid blocking UI
                             output_file = await run.io_bound(
                                 process_run, c, run_dir, ollama_url,
                             )
 
                             lbl.classes(replace="text-sm mt-2 text-green-600")
-                            lbl.text = f"Run complete — output saved to runs/{run_dir.name}/outputs/result.md"
+                            lbl.text = f"Done — {len(copied)} file(s) analyzed → runs/{run_dir.name}/outputs/result.md"
                             lbl.visible = True
                         except ValueError as e:
                             lbl.classes(replace="text-sm mt-2 text-red-500")
