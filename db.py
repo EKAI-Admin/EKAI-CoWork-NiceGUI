@@ -1,3 +1,4 @@
+import json
 import sqlite3
 import os
 from pathlib import Path
@@ -35,6 +36,15 @@ def init_db():
             join_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             created_by INTEGER NOT NULL,
             FOREIGN KEY (created_by) REFERENCES users(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS coworker_config (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            coworker_id INTEGER UNIQUE NOT NULL,
+            input_paths TEXT DEFAULT '[]',
+            processing_prompt TEXT DEFAULT '',
+            output_path TEXT DEFAULT '',
+            FOREIGN KEY (coworker_id) REFERENCES coworkers(id) ON DELETE CASCADE
         );
 
         CREATE TABLE IF NOT EXISTS settings (
@@ -168,6 +178,45 @@ def upsert_settings(user_id: int, provider: str, model: str, ollama_url: str):
                    default_model=excluded.default_model,
                    ollama_base_url=excluded.ollama_base_url""",
             (user_id, provider, model, ollama_url),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# --- CoWorker Config CRUD ---
+
+def get_coworker_config(coworker_id: int) -> dict | None:
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT * FROM coworker_config WHERE coworker_id = ?", (coworker_id,)
+        ).fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        result["input_paths"] = json.loads(result["input_paths"])
+        return result
+    finally:
+        conn.close()
+
+
+def upsert_coworker_config(
+    coworker_id: int,
+    input_paths: list[str],
+    processing_prompt: str,
+    output_path: str,
+):
+    conn = get_db()
+    try:
+        conn.execute(
+            """INSERT INTO coworker_config (coworker_id, input_paths, processing_prompt, output_path)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(coworker_id) DO UPDATE SET
+                   input_paths=excluded.input_paths,
+                   processing_prompt=excluded.processing_prompt,
+                   output_path=excluded.output_path""",
+            (coworker_id, json.dumps(input_paths), processing_prompt, output_path),
         )
         conn.commit()
     finally:

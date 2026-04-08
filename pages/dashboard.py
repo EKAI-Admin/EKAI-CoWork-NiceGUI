@@ -1,6 +1,6 @@
 from nicegui import ui
 from auth import get_current_user
-from db import get_coworkers, create_coworker, update_coworker, delete_coworker, get_settings
+from db import get_coworkers, create_coworker, update_coworker, delete_coworker, get_settings, get_coworker_config, upsert_coworker_config
 from models import STATUS_OPTIONS, WORKFLOW_OPTIONS, CLAUDE_MODELS, OLLAMA_MODELS
 
 
@@ -84,6 +84,109 @@ def _show_coworker_dialog(on_save, coworker=None, user_id=None):
     dialog.open()
 
 
+def _show_workflow_config_dialog(coworker):
+    config = get_coworker_config(coworker["id"])
+    existing_paths = config["input_paths"] if config else []
+    existing_prompt = config["processing_prompt"] if config else ""
+    existing_output = config["output_path"] if config else ""
+
+    path_inputs = []
+
+    with ui.dialog() as dialog, ui.card().classes("w-[600px] p-6"):
+        ui.label(f"Workflow Config — {coworker['name']}").classes("text-xl font-bold mb-2")
+        ui.label(coworker["workflow"]).classes("text-gray-500 mb-4")
+
+        with ui.tabs().classes("w-full") as tabs:
+            input_tab = ui.tab("Inputs", icon="folder_open")
+            processing_tab = ui.tab("Processing", icon="psychology")
+            output_tab = ui.tab("Output", icon="description")
+
+        with ui.tab_panels(tabs, value=input_tab).classes("w-full"):
+            # --- Inputs Tab ---
+            with ui.tab_panel(input_tab):
+                ui.label("Input Sources").classes("text-sm font-semibold mb-1")
+                ui.label("Point to files or folders this CoWorker reads from.").classes("text-xs text-gray-400 mb-3")
+
+                paths_container = ui.column().classes("w-full gap-2")
+
+                def add_path_row(value=""):
+                    with paths_container:
+                        with ui.row().classes("w-full items-center gap-2") as row:
+                            inp = ui.input(
+                                placeholder="/path/to/folder/or/file",
+                                value=value,
+                            ).classes("flex-grow").props("outlined dense")
+                            path_inputs.append(inp)
+
+                            def remove(r=row, i=inp):
+                                if i in path_inputs:
+                                    path_inputs.remove(i)
+                                r.delete()
+
+                            ui.button(icon="close", on_click=remove).props("flat dense round size=sm color=red")
+
+                for p in existing_paths:
+                    add_path_row(p)
+
+                ui.button("Add Path", icon="add", on_click=lambda: add_path_row()).props("flat dense color=primary").classes("mt-2")
+
+            # --- Processing Tab ---
+            with ui.tab_panel(processing_tab):
+                ui.label("Processing Prompt").classes("text-sm font-semibold mb-1")
+                ui.label("The prompt this CoWorker uses to process inputs.").classes("text-xs text-gray-400 mb-3")
+                prompt_input = ui.textarea(
+                    value=existing_prompt,
+                    placeholder="Enter the processing instructions for this CoWorker...",
+                ).classes("w-full").props("outlined rows=10")
+
+            # --- Output Tab ---
+            with ui.tab_panel(output_tab):
+                ui.label("Output Configuration").classes("text-sm font-semibold mb-1")
+                ui.label("Path for the markdown output file.").classes("text-xs text-gray-400 mb-3")
+                output_input = ui.input(
+                    "Output File Path",
+                    value=existing_output,
+                    placeholder="/path/to/output/report.md",
+                ).classes("w-full").props("outlined")
+
+                ui.label("Output Structure Preview").classes("text-sm font-semibold mt-4 mb-2")
+                preview_md = f"""```
+{existing_output or '/path/to/output/report.md'}
+├── # Header (CoWorker Name)
+├── ## Summary
+├── ## Findings
+│   ├── ### Item 1
+│   └── ### Item 2
+└── ## Metadata
+    ├── Model: {coworker['model_provider']}:{coworker['model_name']}
+    ├── Workflow: {coworker['workflow']}
+    └── Generated: <timestamp>
+```"""
+                ui.markdown(preview_md).classes("text-sm bg-gray-50 p-3 rounded")
+
+        success_label = ui.label("").classes("text-green-500 text-sm mt-2")
+        success_label.visible = False
+
+        with ui.row().classes("w-full justify-end mt-4 gap-2"):
+            ui.button("Cancel", on_click=dialog.close).props("flat")
+
+            def save_config():
+                paths = [inp.value.strip() for inp in path_inputs if inp.value.strip()]
+                upsert_coworker_config(
+                    coworker["id"],
+                    paths,
+                    prompt_input.value,
+                    output_input.value.strip(),
+                )
+                success_label.text = "Configuration saved!"
+                success_label.visible = True
+                ui.timer(1.5, dialog.close, once=True)
+
+            ui.button("Save", on_click=save_config).props("color=primary")
+
+    dialog.open()
+
+
 def dashboard_page():
     user = get_current_user()
     if not user:
@@ -127,6 +230,9 @@ def dashboard_page():
                         ui.label(f"Joined {join_display}").classes("text-sm text-gray-500")
 
                     with ui.row().classes("w-full justify-end gap-1 mt-2"):
+                        def make_config(c=cw):
+                            _show_workflow_config_dialog(c)
+
                         def make_edit(c=cw):
                             def on_save(name, job_description, workflow, status, model_provider, model_name):
                                 update_coworker(c["id"], name, job_description, workflow, status, model_provider, model_name)
@@ -137,6 +243,7 @@ def dashboard_page():
                             delete_coworker(c["id"])
                             refresh_cards()
 
+                        ui.button(icon="settings", on_click=make_config).props("flat dense round size=sm color=blue")
                         ui.button(icon="edit", on_click=make_edit).props("flat dense round size=sm")
                         ui.button(icon="delete", on_click=make_delete).props("flat dense round size=sm color=red")
 
