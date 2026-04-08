@@ -81,6 +81,17 @@ def get_user_by_username(username: str) -> dict | None:
 
 # --- CoWorker CRUD ---
 
+def get_coworker_by_id(coworker_id: int) -> dict | None:
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT * FROM coworkers WHERE id = ?", (coworker_id,)
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
 def get_coworkers(user_id: int) -> list[dict]:
     conn = get_db()
     try:

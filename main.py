@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 from nicegui import ui, app
 from db import init_db
 from pages.login import login_page

@@ -1,10 +1,11 @@
-from nicegui import ui
+from nicegui import ui, run
 from auth import get_current_user
 from db import (
     get_coworkers, create_coworker, update_coworker, delete_coworker,
     get_settings, get_coworker_dir, get_prompt, save_prompt,
     start_run, get_runs,
 )
+from ai_runner import process_run
 from models import STATUS_OPTIONS, WORKFLOW_OPTIONS, CLAUDE_MODELS, OLLAMA_MODELS
 
 
@@ -186,16 +187,33 @@ def dashboard_page():
                     run_status = ui.label("").classes("text-sm mt-2")
                     run_status.visible = False
 
-                    def make_run(c=cw, lbl=run_status):
+                    async def make_run(c=cw, lbl=run_status):
                         lbl.visible = False
                         try:
                             run_dir, copied = start_run(c["name"])
+                            lbl.classes(replace="text-sm mt-2 text-blue-600")
+                            lbl.text = f"Processing {len(copied)} file(s) with {c['model_provider']}:{c['model_name']}..."
+                            lbl.visible = True
+
+                            # Get ollama URL from user settings
+                            user_settings = get_settings(user_id)
+                            ollama_url = user_settings["ollama_base_url"] if user_settings else "http://localhost:11434"
+
+                            # Run AI processing in background thread to avoid blocking UI
+                            output_file = await run.io_bound(
+                                process_run, c, run_dir, ollama_url,
+                            )
+
                             lbl.classes(replace="text-sm mt-2 text-green-600")
-                            lbl.text = f"Run started — {len(copied)} file(s) copied to runs/{run_dir.name}/"
+                            lbl.text = f"Run complete — output saved to runs/{run_dir.name}/outputs/result.md"
                             lbl.visible = True
                         except ValueError as e:
                             lbl.classes(replace="text-sm mt-2 text-red-500")
                             lbl.text = str(e)
+                            lbl.visible = True
+                        except Exception as e:
+                            lbl.classes(replace="text-sm mt-2 text-red-500")
+                            lbl.text = f"AI processing failed: {e}"
                             lbl.visible = True
 
                     ui.button("Run", icon="play_arrow", on_click=make_run).classes("w-full mt-2").props("color=green outline dense")
