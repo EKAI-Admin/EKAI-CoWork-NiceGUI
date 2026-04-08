@@ -33,14 +33,6 @@ class UserSettings:
     ollama_base_url: str = "http://localhost:11434"
 
 
-@dataclass
-class CoWorkerConfig:
-    id: int = 0
-    coworker_id: int = 0
-    input_paths: list = field(default_factory=list)
-    processing_prompt: str = ""
-    output_path: str = ""
-
 
 CLAUDE_MODELS = [
     "claude-opus-4-20250514",

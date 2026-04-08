@@ -1,9 +1,10 @@
-import json
+import re
+import shutil
 import sqlite3
-import os
 from pathlib import Path
 
 DB_PATH = Path(__file__).parent / "data" / "cowork.db"
+COWORKERS_BASE = Path(__file__).parent / "coworkers"
 
 
 def get_db() -> sqlite3.Connection:
@@ -36,15 +37,6 @@ def init_db():
             join_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             created_by INTEGER NOT NULL,
             FOREIGN KEY (created_by) REFERENCES users(id)
-        );
-
-        CREATE TABLE IF NOT EXISTS coworker_config (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            coworker_id INTEGER UNIQUE NOT NULL,
-            input_paths TEXT DEFAULT '[]',
-            processing_prompt TEXT DEFAULT '',
-            output_path TEXT DEFAULT '',
-            FOREIGN KEY (coworker_id) REFERENCES coworkers(id) ON DELETE CASCADE
         );
 
         CREATE TABLE IF NOT EXISTS settings (
@@ -118,6 +110,7 @@ def create_coworker(
             (name, job_description, workflow, status, model_provider, model_name, created_by),
         )
         conn.commit()
+        create_coworker_folders(name)
         return cursor.lastrowid
     finally:
         conn.close()
@@ -134,6 +127,7 @@ def update_coworker(
 ):
     conn = get_db()
     try:
+        old = conn.execute("SELECT name FROM coworkers WHERE id = ?", (coworker_id,)).fetchone()
         conn.execute(
             """UPDATE coworkers
                SET name=?, job_description=?, workflow=?, status=?, model_provider=?, model_name=?
@@ -141,6 +135,8 @@ def update_coworker(
             (name, job_description, workflow, status, model_provider, model_name, coworker_id),
         )
         conn.commit()
+        if old and old["name"] != name:
+            rename_coworker_folders(old["name"], name)
     finally:
         conn.close()
 
@@ -148,8 +144,11 @@ def update_coworker(
 def delete_coworker(coworker_id: int):
     conn = get_db()
     try:
+        row = conn.execute("SELECT name FROM coworkers WHERE id = ?", (coworker_id,)).fetchone()
         conn.execute("DELETE FROM coworkers WHERE id = ?", (coworker_id,))
         conn.commit()
+        if row:
+            delete_coworker_folders(row["name"])
     finally:
         conn.close()
 
@@ -184,40 +183,47 @@ def upsert_settings(user_id: int, provider: str, model: str, ollama_url: str):
         conn.close()
 
 
-# --- CoWorker Config CRUD ---
+# --- CoWorker Folder Management ---
 
-def get_coworker_config(coworker_id: int) -> dict | None:
-    conn = get_db()
-    try:
-        row = conn.execute(
-            "SELECT * FROM coworker_config WHERE coworker_id = ?", (coworker_id,)
-        ).fetchone()
-        if not row:
-            return None
-        result = dict(row)
-        result["input_paths"] = json.loads(result["input_paths"])
-        return result
-    finally:
-        conn.close()
+def _sanitize_folder_name(name: str) -> str:
+    return re.sub(r"[^\w\-]", "_", name.strip().lower())
 
 
-def upsert_coworker_config(
-    coworker_id: int,
-    input_paths: list[str],
-    processing_prompt: str,
-    output_path: str,
-):
-    conn = get_db()
-    try:
-        conn.execute(
-            """INSERT INTO coworker_config (coworker_id, input_paths, processing_prompt, output_path)
-               VALUES (?, ?, ?, ?)
-               ON CONFLICT(coworker_id) DO UPDATE SET
-                   input_paths=excluded.input_paths,
-                   processing_prompt=excluded.processing_prompt,
-                   output_path=excluded.output_path""",
-            (coworker_id, json.dumps(input_paths), processing_prompt, output_path),
-        )
-        conn.commit()
-    finally:
-        conn.close()
+def get_coworker_dir(name: str) -> Path:
+    return COWORKERS_BASE / _sanitize_folder_name(name)
+
+
+def create_coworker_folders(name: str) -> Path:
+    base = get_coworker_dir(name)
+    (base / "inputs").mkdir(parents=True, exist_ok=True)
+    (base / "process").mkdir(parents=True, exist_ok=True)
+    (base / "outputs").mkdir(parents=True, exist_ok=True)
+    return base
+
+
+def rename_coworker_folders(old_name: str, new_name: str):
+    old_dir = get_coworker_dir(old_name)
+    new_dir = get_coworker_dir(new_name)
+    if old_dir.exists() and old_dir != new_dir:
+        old_dir.rename(new_dir)
+    elif not new_dir.exists():
+        create_coworker_folders(new_name)
+
+
+def delete_coworker_folders(name: str):
+    d = get_coworker_dir(name)
+    if d.exists():
+        shutil.rmtree(d)
+
+
+def get_prompt(name: str) -> str:
+    prompt_file = get_coworker_dir(name) / "process" / "prompt.md"
+    if prompt_file.exists():
+        return prompt_file.read_text()
+    return ""
+
+
+def save_prompt(name: str, prompt: str):
+    prompt_file = get_coworker_dir(name) / "process" / "prompt.md"
+    prompt_file.parent.mkdir(parents=True, exist_ok=True)
+    prompt_file.write_text(prompt)
