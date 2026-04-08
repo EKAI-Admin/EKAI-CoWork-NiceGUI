@@ -1,5 +1,5 @@
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(override=True)
 
 from nicegui import ui, app
 from db import init_db
