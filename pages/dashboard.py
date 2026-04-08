@@ -3,6 +3,7 @@ from auth import get_current_user
 from db import (
     get_coworkers, create_coworker, update_coworker, delete_coworker,
     get_settings, get_coworker_dir, get_prompt, save_prompt,
+    start_run, get_runs,
 )
 from models import STATUS_OPTIONS, WORKFLOW_OPTIONS, CLAUDE_MODELS, OLLAMA_MODELS
 
@@ -101,7 +102,12 @@ def _show_prompt_dialog(coworker):
 ├── inputs/    ← drop files here for processing
 ├── process/
 │   └── prompt.md  ← saved from below
-└── outputs/   ← results appear here
+├── outputs/   ← results appear here
+└── runs/      ← timestamped run snapshots
+    └── YYYYMMDD_HHMMSS/
+        ├── inputs/   (copied from inputs/)
+        ├── process/  (copied prompt.md)
+        └── outputs/  (run results)
 ```"""
         ui.markdown(folder_md).classes("text-xs bg-gray-50 p-3 rounded mb-4")
 
@@ -175,6 +181,24 @@ def dashboard_page():
                     with ui.row().classes("w-full items-center gap-2"):
                         ui.icon("folder", size="16px").classes("text-gray-400")
                         ui.label(f"coworkers/{get_coworker_dir(cw['name']).name}/").classes("text-sm text-gray-500 font-mono")
+
+                    # Run button + status
+                    run_status = ui.label("").classes("text-sm mt-2")
+                    run_status.visible = False
+
+                    def make_run(c=cw, lbl=run_status):
+                        lbl.visible = False
+                        try:
+                            run_dir, copied = start_run(c["name"])
+                            lbl.classes(replace="text-sm mt-2 text-green-600")
+                            lbl.text = f"Run started — {len(copied)} file(s) copied to runs/{run_dir.name}/"
+                            lbl.visible = True
+                        except ValueError as e:
+                            lbl.classes(replace="text-sm mt-2 text-red-500")
+                            lbl.text = str(e)
+                            lbl.visible = True
+
+                    ui.button("Run", icon="play_arrow", on_click=make_run).classes("w-full mt-2").props("color=green outline dense")
 
                     with ui.row().classes("w-full justify-end gap-1 mt-2"):
                         def make_config(c=cw):

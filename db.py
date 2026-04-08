@@ -1,6 +1,7 @@
 import re
 import shutil
 import sqlite3
+from datetime import datetime
 from pathlib import Path
 
 DB_PATH = Path(__file__).parent / "data" / "cowork.db"
@@ -198,6 +199,7 @@ def create_coworker_folders(name: str) -> Path:
     (base / "inputs").mkdir(parents=True, exist_ok=True)
     (base / "process").mkdir(parents=True, exist_ok=True)
     (base / "outputs").mkdir(parents=True, exist_ok=True)
+    (base / "runs").mkdir(parents=True, exist_ok=True)
     return base
 
 
@@ -227,3 +229,60 @@ def save_prompt(name: str, prompt: str):
     prompt_file = get_coworker_dir(name) / "process" / "prompt.md"
     prompt_file.parent.mkdir(parents=True, exist_ok=True)
     prompt_file.write_text(prompt)
+
+
+# --- Run Management ---
+
+def start_run(name: str) -> tuple[Path, list[str]]:
+    """Create a timestamped run folder, copy inputs and prompt into it.
+
+    Returns (run_dir, list of copied input filenames).
+    Raises ValueError if no prompt or no input files exist.
+    """
+    cw_dir = get_coworker_dir(name)
+    inputs_dir = cw_dir / "inputs"
+    prompt_file = cw_dir / "process" / "prompt.md"
+
+    if not prompt_file.exists() or not prompt_file.read_text().strip():
+        raise ValueError("No prompt configured. Set a prompt first.")
+
+    input_files = [f for f in inputs_dir.iterdir() if f.is_file()] if inputs_dir.exists() else []
+    if not input_files:
+        raise ValueError("No input files found in the inputs/ folder.")
+
+    # Create timestamped run directory
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_dir = cw_dir / "runs" / timestamp
+    (run_dir / "inputs").mkdir(parents=True, exist_ok=True)
+    (run_dir / "process").mkdir(parents=True, exist_ok=True)
+    (run_dir / "outputs").mkdir(parents=True, exist_ok=True)
+
+    # Copy input files
+    copied = []
+    for f in input_files:
+        shutil.copy2(f, run_dir / "inputs" / f.name)
+        copied.append(f.name)
+
+    # Copy prompt
+    shutil.copy2(prompt_file, run_dir / "process" / "prompt.md")
+
+    return run_dir, copied
+
+
+def get_runs(name: str) -> list[dict]:
+    """Return list of runs for a coworker, newest first."""
+    runs_dir = get_coworker_dir(name) / "runs"
+    if not runs_dir.exists():
+        return []
+    runs = []
+    for d in sorted(runs_dir.iterdir(), reverse=True):
+        if d.is_dir():
+            input_count = len(list((d / "inputs").iterdir())) if (d / "inputs").exists() else 0
+            output_count = len(list((d / "outputs").iterdir())) if (d / "outputs").exists() else 0
+            runs.append({
+                "timestamp": d.name,
+                "path": str(d),
+                "input_count": input_count,
+                "output_count": output_count,
+            })
+    return runs
