@@ -151,9 +151,8 @@ def _show_prompt_dialog(coworker):
                 refresh_skills_list()
 
                 async def handle_upload(e):
-                    for file in e.files:
-                        content = file.read()
-                        save_skill_bundle(cw_name, file.name, content)
+                    content = e.content.read()
+                    save_skill_bundle(cw_name, e.name, content)
                     refresh_skills_list()
 
                 ui.upload(
