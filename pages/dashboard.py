@@ -95,42 +95,30 @@ def _show_prompt_dialog(coworker):
     cw_name = coworker["name"]
     existing_prompt = get_prompt(cw_name)
 
-    with ui.dialog() as dialog, ui.card().classes("w-[650px] p-6 max-h-[90vh]"):
-        ui.label(f"Configure — {cw_name}").classes("text-xl font-bold mb-2")
-        ui.label(coworker["workflow"]).classes("text-gray-500 mb-2")
-
-        # Show folder structure
-        folder_md = f"""```
-{cw_dir.name}/
-├── inputs/         ← drop files here for processing
-├── process/
-│   ├── prompt.md   ← saved from below
-│   └── skills/     ← skill bundle files (system context)
-├── outputs/        ← results appear here
-└── runs/           ← timestamped run snapshots
-```"""
-        ui.markdown(folder_md).classes("text-xs bg-gray-50 p-3 rounded mb-4")
+    with ui.dialog() as dialog, ui.card().classes("w-[650px] p-6"):
+        ui.label(f"Configure — {cw_name}").classes("text-xl font-bold mb-1")
+        ui.label(f"{coworker['workflow']} · {cw_dir.name}/").classes("text-gray-500 text-sm mb-3 font-mono")
 
         with ui.tabs().classes("w-full") as tabs:
             prompt_tab = ui.tab("Prompt", icon="edit_note")
             skills_tab = ui.tab("Skills", icon="extension")
 
-        with ui.tab_panels(tabs, value=prompt_tab).classes("w-full"):
+        with ui.tab_panels(tabs, value=prompt_tab).classes("w-full").style("min-height: 400px;"):
             # --- Prompt Tab ---
             with ui.tab_panel(prompt_tab):
                 ui.label("Processing Prompt").classes("text-sm font-semibold mb-1")
-                ui.label("This prompt is sent to the AI model along with each input file.").classes("text-xs text-gray-400 mb-3")
+                ui.label("Sent to the AI model along with each input file.").classes("text-xs text-gray-400 mb-3")
 
                 prompt_input = ui.textarea(
                     value=existing_prompt,
                     placeholder="Enter the processing instructions for this CoWorker...",
-                ).classes("w-full").props("outlined rows=10")
+                ).classes("w-full").props("outlined rows=12")
 
             # --- Skills Tab ---
             with ui.tab_panel(skills_tab):
                 ui.label("Skill Bundle").classes("text-sm font-semibold mb-1")
                 ui.label(
-                    "Upload skill files (.md, .txt, .yaml) that provide system-level context and instructions to the AI model."
+                    "Upload skill files that provide system-level context to the AI model."
                 ).classes("text-xs text-gray-400 mb-3")
 
                 skills_list_container = ui.column().classes("w-full gap-1")
