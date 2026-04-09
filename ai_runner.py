@@ -166,18 +166,22 @@ def _write_result(
 # --- Skills ---
 
 def _load_skills(run_dir: Path) -> str:
-    """Read all skill bundle files from run_dir/process/skills/ and combine them."""
+    """Read all skill files from run_dir/process/skills/<skill-name>/ folders."""
     skills_dir = run_dir / "process" / "skills"
     if not skills_dir.exists():
         return ""
     parts = []
-    for f in sorted(skills_dir.iterdir()):
-        if f.is_file():
-            try:
-                content = f.read_text(errors="replace")
-                parts.append(f"# Skill: {f.name}\n\n{content}")
-            except Exception:
-                continue
+    for skill_folder in sorted(skills_dir.iterdir()):
+        if not skill_folder.is_dir():
+            continue
+        for f in sorted(skill_folder.rglob("*")):
+            if f.is_file():
+                try:
+                    content = f.read_text(errors="replace")
+                    rel = f.relative_to(skills_dir)
+                    parts.append(f"# Skill: {rel}\n\n{content}")
+                except Exception:
+                    continue
     return "\n\n---\n\n".join(parts)
 
 

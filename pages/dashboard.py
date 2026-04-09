@@ -4,7 +4,7 @@ from db import (
     get_coworkers, create_coworker, update_coworker, delete_coworker,
     get_settings, get_coworker_dir, get_prompt, save_prompt,
     start_run, get_runs, get_user_by_username,
-    list_skills, save_skill_file, delete_skill_file,
+    list_skills, save_skill_bundle, delete_skill, get_skill_files,
 )
 from ai_runner import process_run
 from models import STATUS_OPTIONS, WORKFLOW_OPTIONS, CLAUDE_MODELS, OLLAMA_MODELS
@@ -116,44 +116,52 @@ def _show_prompt_dialog(coworker):
 
             # --- Skills Tab ---
             with ui.tab_panel(skills_tab):
-                ui.label("Skill Bundle").classes("text-sm font-semibold mb-1")
+                ui.label("Skill Bundles").classes("text-sm font-semibold mb-1")
                 ui.label(
-                    "Upload skill files that provide system-level context to the AI model."
+                    "Upload .skill or .zip bundles. Each is extracted into its own folder under process/skills/."
                 ).classes("text-xs text-gray-400 mb-3")
 
-                skills_list_container = ui.column().classes("w-full gap-1")
+                skills_list_container = ui.column().classes("w-full gap-2")
 
                 def refresh_skills_list():
                     skills_list_container.clear()
                     skills = list_skills(cw_name)
                     with skills_list_container:
                         if not skills:
-                            ui.label("No skill files uploaded yet.").classes("text-gray-400 text-sm italic")
+                            ui.label("No skill bundles uploaded yet.").classes("text-gray-400 text-sm italic")
                             return
                         for sk in skills:
-                            with ui.row().classes("w-full items-center justify-between bg-gray-50 rounded px-3 py-1"):
-                                with ui.row().classes("items-center gap-2"):
-                                    ui.icon("description", size="16px").classes("text-blue-400")
-                                    ui.label(sk).classes("text-sm font-mono")
-                                def do_delete(s=sk):
-                                    delete_skill_file(cw_name, s)
-                                    refresh_skills_list()
-                                ui.button(icon="close", on_click=do_delete).props("flat dense round size=xs color=red")
+                            files = get_skill_files(cw_name, sk)
+                            with ui.card().classes("w-full p-3"):
+                                with ui.row().classes("w-full items-center justify-between"):
+                                    with ui.row().classes("items-center gap-2"):
+                                        ui.icon("extension", size="20px").classes("text-blue-500")
+                                        ui.label(sk).classes("text-sm font-semibold font-mono")
+                                    def do_delete(s=sk):
+                                        delete_skill(cw_name, s)
+                                        refresh_skills_list()
+                                    ui.button(icon="delete", on_click=do_delete).props("flat dense round size=sm color=red")
+                                if files:
+                                    with ui.column().classes("ml-7 gap-0"):
+                                        for f in files[:10]:
+                                            ui.label(f).classes("text-xs text-gray-500 font-mono")
+                                        if len(files) > 10:
+                                            ui.label(f"... and {len(files) - 10} more").classes("text-xs text-gray-400 italic")
 
                 refresh_skills_list()
 
                 async def handle_upload(e):
                     for file in e.files:
                         content = file.read()
-                        save_skill_file(cw_name, file.name, content)
+                        save_skill_bundle(cw_name, file.name, content)
                     refresh_skills_list()
 
                 ui.upload(
-                    label="Upload Skill Files",
+                    label="Upload Skill Bundle (.skill, .zip)",
                     on_upload=handle_upload,
                     multiple=True,
                     auto_upload=True,
-                ).classes("w-full mt-3").props("accept='.md,.txt,.yaml,.yml,.json'")
+                ).classes("w-full mt-3").props("accept='.skill,.zip'")
 
         success_label = ui.label("").classes("text-green-500 text-sm mt-2")
         success_label.visible = False

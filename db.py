@@ -1,7 +1,9 @@
 import re
 import shutil
 import sqlite3
+import zipfile
 from datetime import datetime
+from io import BytesIO
 from pathlib import Path
 
 DB_PATH = Path(__file__).parent / "data" / "cowork.db"
@@ -252,19 +254,43 @@ def get_skills_dir(name: str) -> Path:
 
 
 def list_skills(name: str) -> list[str]:
+    """Return sorted list of skill folder names under process/skills/."""
     d = get_skills_dir(name)
-    return sorted(f.name for f in d.iterdir() if f.is_file())
+    return sorted(f.name for f in d.iterdir() if f.is_dir())
 
 
-def save_skill_file(name: str, filename: str, content: bytes):
-    path = get_skills_dir(name) / filename
-    path.write_bytes(content)
+def save_skill_bundle(coworker_name: str, filename: str, content: bytes):
+    """Extract a .zip or .skill file into process/skills/<skill-name>/.
+
+    The skill name is derived from the filename (without extension).
+    """
+    stem = Path(filename).stem
+    skill_dir = get_skills_dir(coworker_name) / _sanitize_folder_name(stem)
+    if skill_dir.exists():
+        shutil.rmtree(skill_dir)
+    skill_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        with zipfile.ZipFile(BytesIO(content)) as zf:
+            zf.extractall(skill_dir)
+    except zipfile.BadZipFile:
+        # Not a zip — treat as a single text skill file
+        (skill_dir / filename).write_bytes(content)
 
 
-def delete_skill_file(name: str, filename: str):
-    path = get_skills_dir(name) / filename
-    if path.exists():
-        path.unlink()
+def delete_skill(coworker_name: str, skill_name: str):
+    """Remove an entire skill folder."""
+    path = get_skills_dir(coworker_name) / skill_name
+    if path.exists() and path.is_dir():
+        shutil.rmtree(path)
+
+
+def get_skill_files(coworker_name: str, skill_name: str) -> list[str]:
+    """List files inside a skill folder."""
+    d = get_skills_dir(coworker_name) / skill_name
+    if not d.exists():
+        return []
+    return sorted(str(f.relative_to(d)) for f in d.rglob("*") if f.is_file())
 
 
 # --- Run Management ---
@@ -302,14 +328,10 @@ def start_run(name: str) -> tuple[Path, list[str]]:
     # Copy prompt
     shutil.copy2(prompt_file, run_dir / "process" / "prompt.md")
 
-    # Copy skill bundle files
+    # Copy skill bundle folders
     skills_dir = cw_dir / "process" / "skills"
-    if skills_dir.exists():
-        run_skills = run_dir / "process" / "skills"
-        run_skills.mkdir(parents=True, exist_ok=True)
-        for sf in skills_dir.iterdir():
-            if sf.is_file():
-                shutil.copy2(sf, run_skills / sf.name)
+    if skills_dir.exists() and any(skills_dir.iterdir()):
+        shutil.copytree(skills_dir, run_dir / "process" / "skills", dirs_exist_ok=True)
 
     return run_dir, copied
 
