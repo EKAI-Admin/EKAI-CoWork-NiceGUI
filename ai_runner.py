@@ -163,34 +163,61 @@ def _write_result(
     return output_file
 
 
+# --- Skills ---
+
+def _load_skills(run_dir: Path) -> str:
+    """Read all skill bundle files from run_dir/process/skills/ and combine them."""
+    skills_dir = run_dir / "process" / "skills"
+    if not skills_dir.exists():
+        return ""
+    parts = []
+    for f in sorted(skills_dir.iterdir()):
+        if f.is_file():
+            try:
+                content = f.read_text(errors="replace")
+                parts.append(f"# Skill: {f.name}\n\n{content}")
+            except Exception:
+                continue
+    return "\n\n---\n\n".join(parts)
+
+
 # --- Claude ---
 
-def _call_claude_single(model: str, prompt: str, file: dict) -> str:
+def _call_claude_single(model: str, prompt: str, file: dict, system: str = "") -> str:
     """Send prompt + one file to Claude API using native multimodal content blocks."""
     client = anthropic.Anthropic()
     content_blocks = _build_claude_blocks_single(prompt, file)
 
-    message = client.messages.create(
-        model=model,
-        max_tokens=4096,
-        messages=[{"role": "user", "content": content_blocks}],
-    )
+    kwargs = {
+        "model": model,
+        "max_tokens": 4096,
+        "messages": [{"role": "user", "content": content_blocks}],
+    }
+    if system:
+        kwargs["system"] = system
+
+    message = client.messages.create(**kwargs)
     return message.content[0].text
 
 
 # --- Ollama ---
 
-def _call_ollama_single(model: str, prompt: str, file: dict, base_url: str) -> str:
+def _call_ollama_single(model: str, prompt: str, file: dict, base_url: str, system: str = "") -> str:
     """Send prompt + one file to Ollama API."""
     text_message = _build_text_message_single(prompt, file)
 
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": text_message})
+
     payload = {
         "model": model,
-        "messages": [{"role": "user", "content": text_message}],
+        "messages": messages,
         "stream": False,
     }
     if file["type"] == "image":
-        payload["messages"][0]["images"] = [file["data"]]
+        payload["messages"][-1]["images"] = [file["data"]]
 
     response = httpx.post(
         f"{base_url.rstrip('/')}/api/chat",
@@ -238,13 +265,16 @@ def process_run(
     model = coworker["model_name"]
     name = coworker["name"]
 
+    # Load skill bundle as system context
+    skills_context = _load_skills(run_dir)
+
     # Process each file individually
     file_results = []
     for i, f in enumerate(files):
         if provider == "claude":
-            response = _call_claude_single(model, prompt, f)
+            response = _call_claude_single(model, prompt, f, system=skills_context)
         elif provider == "ollama":
-            response = _call_ollama_single(model, prompt, f, ollama_base_url)
+            response = _call_ollama_single(model, prompt, f, ollama_base_url, system=skills_context)
         else:
             raise ValueError(f"Unknown provider: {provider}")
 

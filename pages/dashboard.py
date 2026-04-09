@@ -4,6 +4,7 @@ from db import (
     get_coworkers, create_coworker, update_coworker, delete_coworker,
     get_settings, get_coworker_dir, get_prompt, save_prompt,
     start_run, get_runs, get_user_by_username,
+    list_skills, save_skill_file, delete_skill_file,
 )
 from ai_runner import process_run
 from models import STATUS_OPTIONS, WORKFLOW_OPTIONS, CLAUDE_MODELS, OLLAMA_MODELS
@@ -91,34 +92,80 @@ def _show_coworker_dialog(on_save, coworker=None, user_id=None):
 
 def _show_prompt_dialog(coworker):
     cw_dir = get_coworker_dir(coworker["name"])
-    existing_prompt = get_prompt(coworker["name"])
+    cw_name = coworker["name"]
+    existing_prompt = get_prompt(cw_name)
 
-    with ui.dialog() as dialog, ui.card().classes("w-[600px] p-6"):
-        ui.label(f"Prompt — {coworker['name']}").classes("text-xl font-bold mb-2")
+    with ui.dialog() as dialog, ui.card().classes("w-[650px] p-6 max-h-[90vh]"):
+        ui.label(f"Configure — {cw_name}").classes("text-xl font-bold mb-2")
         ui.label(coworker["workflow"]).classes("text-gray-500 mb-2")
 
         # Show folder structure
         folder_md = f"""```
 {cw_dir.name}/
-├── inputs/    ← drop files here for processing
+├── inputs/         ← drop files here for processing
 ├── process/
-│   └── prompt.md  ← saved from below
-├── outputs/   ← results appear here
-└── runs/      ← timestamped run snapshots
-    └── YYYYMMDD_HHMMSS/
-        ├── inputs/   (copied from inputs/)
-        ├── process/  (copied prompt.md)
-        └── outputs/  (run results)
+│   ├── prompt.md   ← saved from below
+│   └── skills/     ← skill bundle files (system context)
+├── outputs/        ← results appear here
+└── runs/           ← timestamped run snapshots
 ```"""
         ui.markdown(folder_md).classes("text-xs bg-gray-50 p-3 rounded mb-4")
 
-        ui.label("Processing Prompt").classes("text-sm font-semibold mb-1")
-        ui.label("This prompt is sent to the AI model along with each input file.").classes("text-xs text-gray-400 mb-3")
+        with ui.tabs().classes("w-full") as tabs:
+            prompt_tab = ui.tab("Prompt", icon="edit_note")
+            skills_tab = ui.tab("Skills", icon="extension")
 
-        prompt_input = ui.textarea(
-            value=existing_prompt,
-            placeholder="Enter the processing instructions for this CoWorker...",
-        ).classes("w-full").props("outlined rows=12")
+        with ui.tab_panels(tabs, value=prompt_tab).classes("w-full"):
+            # --- Prompt Tab ---
+            with ui.tab_panel(prompt_tab):
+                ui.label("Processing Prompt").classes("text-sm font-semibold mb-1")
+                ui.label("This prompt is sent to the AI model along with each input file.").classes("text-xs text-gray-400 mb-3")
+
+                prompt_input = ui.textarea(
+                    value=existing_prompt,
+                    placeholder="Enter the processing instructions for this CoWorker...",
+                ).classes("w-full").props("outlined rows=10")
+
+            # --- Skills Tab ---
+            with ui.tab_panel(skills_tab):
+                ui.label("Skill Bundle").classes("text-sm font-semibold mb-1")
+                ui.label(
+                    "Upload skill files (.md, .txt, .yaml) that provide system-level context and instructions to the AI model."
+                ).classes("text-xs text-gray-400 mb-3")
+
+                skills_list_container = ui.column().classes("w-full gap-1")
+
+                def refresh_skills_list():
+                    skills_list_container.clear()
+                    skills = list_skills(cw_name)
+                    with skills_list_container:
+                        if not skills:
+                            ui.label("No skill files uploaded yet.").classes("text-gray-400 text-sm italic")
+                            return
+                        for sk in skills:
+                            with ui.row().classes("w-full items-center justify-between bg-gray-50 rounded px-3 py-1"):
+                                with ui.row().classes("items-center gap-2"):
+                                    ui.icon("description", size="16px").classes("text-blue-400")
+                                    ui.label(sk).classes("text-sm font-mono")
+                                def do_delete(s=sk):
+                                    delete_skill_file(cw_name, s)
+                                    refresh_skills_list()
+                                ui.button(icon="close", on_click=do_delete).props("flat dense round size=xs color=red")
+
+                refresh_skills_list()
+
+                async def handle_upload(e):
+                    for file in e.files:
+                        content = file.read()
+                        save_skill_file(cw_name, file.name, content)
+                    refresh_skills_list()
+
+                ui.upload(
+                    label="Upload Skill Files",
+                    on_upload=handle_upload,
+                    multiple=True,
+                    auto_upload=True,
+                ).classes("w-full mt-3").props("accept='.md,.txt,.yaml,.yml,.json'")
 
         success_label = ui.label("").classes("text-green-500 text-sm mt-2")
         success_label.visible = False
@@ -127,7 +174,7 @@ def _show_prompt_dialog(coworker):
             ui.button("Cancel", on_click=dialog.close).props("flat")
 
             def save():
-                save_prompt(coworker["name"], prompt_input.value)
+                save_prompt(cw_name, prompt_input.value)
                 success_label.text = "Prompt saved to process/prompt.md"
                 success_label.visible = True
                 ui.timer(1.5, dialog.close, once=True)

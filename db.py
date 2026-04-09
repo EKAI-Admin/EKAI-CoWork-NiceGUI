@@ -209,6 +209,7 @@ def create_coworker_folders(name: str) -> Path:
     base = get_coworker_dir(name)
     (base / "inputs").mkdir(parents=True, exist_ok=True)
     (base / "process").mkdir(parents=True, exist_ok=True)
+    (base / "process" / "skills").mkdir(parents=True, exist_ok=True)
     (base / "outputs").mkdir(parents=True, exist_ok=True)
     (base / "runs").mkdir(parents=True, exist_ok=True)
     return base
@@ -240,6 +241,30 @@ def save_prompt(name: str, prompt: str):
     prompt_file = get_coworker_dir(name) / "process" / "prompt.md"
     prompt_file.parent.mkdir(parents=True, exist_ok=True)
     prompt_file.write_text(prompt)
+
+
+# --- Skill Bundle Management ---
+
+def get_skills_dir(name: str) -> Path:
+    d = get_coworker_dir(name) / "process" / "skills"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def list_skills(name: str) -> list[str]:
+    d = get_skills_dir(name)
+    return sorted(f.name for f in d.iterdir() if f.is_file())
+
+
+def save_skill_file(name: str, filename: str, content: bytes):
+    path = get_skills_dir(name) / filename
+    path.write_bytes(content)
+
+
+def delete_skill_file(name: str, filename: str):
+    path = get_skills_dir(name) / filename
+    if path.exists():
+        path.unlink()
 
 
 # --- Run Management ---
@@ -276,6 +301,15 @@ def start_run(name: str) -> tuple[Path, list[str]]:
 
     # Copy prompt
     shutil.copy2(prompt_file, run_dir / "process" / "prompt.md")
+
+    # Copy skill bundle files
+    skills_dir = cw_dir / "process" / "skills"
+    if skills_dir.exists():
+        run_skills = run_dir / "process" / "skills"
+        run_skills.mkdir(parents=True, exist_ok=True)
+        for sf in skills_dir.iterdir():
+            if sf.is_file():
+                shutil.copy2(sf, run_skills / sf.name)
 
     return run_dir, copied
 
